@@ -7,11 +7,11 @@ import numpy as np
 import torch
 
 
-# Get image path and pose from dataset_train.txt.
-# There is an invalid value in dataset_train.txt, 
-# so you have to delete it manually.
+# get image path and pose from dataset_train.txt
+# there is an invalid value in the dataset_train.txt
+# so you have to delete it manually?
 def make_dataset(dir, train=True):
-    # It needs to be optimized more.
+
     if train:
         paths = np.genfromtxt(os.path.join(dir, 'dataset_train.txt'),
                               dtype=str, delimiter=' ', skip_header=3,
@@ -36,6 +36,7 @@ def make_dataset(dir, train=True):
     return paths, poses
 
 
+# this is called by the __init__ of PoseData
 def default_loader(path):
     return Image.open(path).convert('RGB')
 
@@ -56,10 +57,12 @@ class PoseData(data.Dataset):
         path = self.paths[index]
         target = self.poses[index]
         img = self.loader(os.path.join(self.root, path))
+
         if self.transform is not None:
             img = self.transform(img)
+
         if self.target_transform is not None:
-            target = self.target_transform(target)
+            target = self.target_transform(target)  # maybe this won't execute
 
         target = torch.from_numpy(target)
         return img, target

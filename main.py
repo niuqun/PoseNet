@@ -16,51 +16,47 @@ from PoseNet import PoseNet
 
 
 def main():
-    best_loss = 10000
+    best_loss = 10000  # starts with a very large loss
     start_epoch = 0
     # learning rate
     lr = 1e-4
 
-    # use ResNet-34 for pretrained model of PoseNet
+    # use Resnet-34 for pretrained model of PoseNet
     original_model = models.resnet34(pretrained=True)
+
     # make PoseNet
     model = PoseNet(original_model)
-    # model.features = torch.nn.DataParallel(model.features)
-    model.cuda()
-
-    # for resume code, update epoch and best loss
-    # checkpoint = torch.load('model_best.pth.tar-Res34')
-    # model.load_state_dict(checkpoint['state_dict'])
-    # start_epoch = checkpoint['epoch']
-    # best_loss = checkpoint['best_loss']
+    model.cuda(1)
 
     cudnn.benchmark = True
 
-    # Data loading code
-    datadir = './dataset/KingsCollege'
+    # Data loading
+    datadir = './KingsCollege'
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
     train_loader = torch.utils.data.DataLoader(
         PoseData.PoseData(datadir, transforms.Compose([
             transforms.Scale(256),
-            transforms.RandomCrop(224),
+            transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize
         ]), train=True),
         batch_size=75, shuffle=True,
-        num_workers=8, pin_memory=True)
+        num_workers=8, pin_memory=True
+    )
 
     val_loader = torch.utils.data.DataLoader(
         PoseData.PoseData(datadir, transforms.Compose([
             transforms.Scale(256),
-            transforms.CenterCrop(224),
+            transforms.RandomCrop(224),
             transforms.ToTensor(),
             normalize
         ]), train=False),
         batch_size=75, shuffle=False,
         num_workers=8, pin_memory=True)
 
+    # specify per-layer parameters
     optimizer = torch.optim.Adam([{'params': model.features.parameters(), 'lr': lr},
                                   {'params': model.regressor.parameters(), 'lr': lr},
                                   {'params': model.trans_regressor.parameters(), 'lr': lr},
@@ -70,7 +66,7 @@ def main():
     for epoch in range(start_epoch, 160):
         adjust_learning_rate(optimizer, epoch)
 
-        # train for one epoch
+        # tran for one epoch
         train(train_loader, model, optimizer, epoch)
 
         # evaluate on validation set
@@ -96,8 +92,8 @@ def train(train_loader, model, optimizer, epoch):
     beta = 500
 
     for i, (input, target) in enumerate(train_loader):
-        target = target.cuda()
-        input_var = torch.autograd.Variable(input.cuda())
+        target = target.cuda(1)
+        input_var = torch.autograd.Variable(input.cuda(1))
         target_var = torch.autograd.Variable(target)
 
         # compute output
@@ -119,9 +115,9 @@ def train(train_loader, model, optimizer, epoch):
         print('Epoch: [{0}][{1}]\t'
               'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
               'Trans Loss {trans_loss.val:.4f} ({trans_loss.avg:.4f})\t'
-              'Rotation Loss {rotation_loss.val:.4f} ({rotation_loss.avg:.4f})\t'.format(
-               epoch, len(train_loader), loss=losses,
-               trans_loss=trans_losses, rotation_loss=rotation_losses))
+              'Rotation Loss {rotation_loss.val:.4f} ({rotation_loss.avg:.4f})'.format(
+            epoch, len(train_loader), loss=losses, trans_loss=trans_losses,
+            rotation_loss=rotation_losses))
 
 
 def validate(val_loader, model):
@@ -135,9 +131,9 @@ def validate(val_loader, model):
     beta = 500
 
     for i, (input, target) in enumerate(val_loader):
-        target = target.cuda()
-        input_var = torch.autograd.Variable(input.cuda(), volatile=True)
-        target_var = torch.autograd.Variable(target, volatile=True)
+        target = target.cuda(1)
+        input_var = torch.autograd.Variable(input.cuda(1), volatile=True)
+        target_var = torch.autograd.Variable(target, volatile=True)  # why no cuda()?
 
         # compute output
         trans_output, rotation_output = model(input_var)
@@ -149,17 +145,17 @@ def validate(val_loader, model):
         losses.update(loss.data[0], input.size(0))
         trans_losses.update(trans_loss.data[0], input.size(0))
         rotation_losses.update(rotation_loss.data[0], input.size(0))
-        rotation_errors.update(rotation_error(rotation_output, target_var[:, 3:]).data[0],
-                               input.size(0))
+        rotation_errors.update(rotation_error(rotation_output,
+                                              target_var[:, 3:]).data[0], input.size(0))
 
     print('Test: [{0}]\t'
           'Loss ({loss.avg:.4f})\t'
           'Trans Loss ({trans_loss.avg:.4f})\t'
           'Rotation Loss ({rotation_loss.avg:.4f})\t'
-          'Rotation Error ({rotation_error.avg:.4f})\t'.format(
-           len(val_loader), loss=losses,
-           trans_loss=trans_losses, rotation_loss=rotation_losses,
-           rotation_error=rotation_errors))
+          'Rotation Error ({rotation_error.avg:.4f})'.format(
+        len(val_loader), loss=losses, trans_loss=trans_losses,
+        rotation_loss=rotation_losses, rotation_error=rotation_errors)
+    )
 
     return losses.avg, trans_losses.avg, rotation_losses.avg
 
@@ -178,20 +174,21 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def pose_loss(input, target):
-    x = torch.norm(input-target, dim=1)
+    x = torch.norm(input - target, dim=1)  # dim=1???
     x = torch.mean(x)
 
     return x
 
 
 def rotation_error(input, target):
+
     x1 = torch.norm(input, dim=1)
     x2 = torch.norm(target, dim=1)
 
     x1 = torch.div(input, torch.stack((x1, x1, x1, x1), dim=1))
     x2 = torch.div(target, torch.stack((x2, x2, x2, x2), dim=1))
     d = torch.abs(torch.sum(x1 * x2, dim=1))
-    theta = 2 * torch.acos(d) * 180/math.pi
+    theta = 2 * torch.acos(d) * 180 / math.pi
     theta = torch.mean(theta)
 
     return theta
